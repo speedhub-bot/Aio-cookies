@@ -15,7 +15,6 @@ Strategy:
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -110,8 +109,8 @@ _PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r'"membershipPlan"\s*:\s*"([^"]+)"'),
     ),
     "country": (
-        re.compile(r'"countryOfSignup"\s*:\s*"([A-Za-z\\-]+)"'),
-        re.compile(r'"currentCountry"\s*:\s*"([A-Za-z\\-]+)"'),
+        re.compile(r'"countryOfSignup"\s*:\s*"([A-Za-z-]+)"'),
+        re.compile(r'"currentCountry"\s*:\s*"([A-Za-z-]+)"'),
     ),
     "max_streams": (
         re.compile(r'"maxStreams"\s*:\s*(\d+)'),
@@ -134,11 +133,11 @@ _PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r'"streamingQuality"\s*:\s*"([^"]+)"'),
     ),
     "phone": (
-        re.compile(r'"phoneNumber"\s*:\s*"(\+?[\d\\-\\s]+)"'),
+        re.compile(r'"phoneNumber"\s*:\s*"(\+?[\d\-\s]+)"'),
     ),
     "user_guid": (
         re.compile(r'"userGuid"\s*:\s*"([A-Z0-9]+)"'),
-        re.compile(r'"netflixId"\s*:\s*"([A-Z0-9\\-]+)"'),
+        re.compile(r'"netflixId"\s*:\s*"([A-Z0-9-]+)"'),
     ),
     "membership_status": (
         re.compile(r'"membershipStatus"\s*:\s*"([^"]+)"'),

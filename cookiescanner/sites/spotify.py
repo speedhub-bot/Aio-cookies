@@ -25,7 +25,6 @@ Strategy: profile endpoint is the alive check. Overview HTML gives plan
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -62,7 +61,7 @@ class SpotifyAdapter(SiteAdapter):
             result.endpoints_tried.append(
                 {"url": url, "status": r.status_code, "len": len(r.text)}
             )
-            if r.status_code in (401, 302, 307):
+            if r.status_code != 200:
                 result.error = (
                     f"/api/account-settings/v1/profile returned "
                     f"{r.status_code} (cookie dead or wrong jar)"
@@ -76,8 +75,11 @@ class SpotifyAdapter(SiteAdapter):
             profile = data.get("profile") if isinstance(data.get("profile"), dict) else {}
             email = profile.get("email") or data.get("email")
             country = profile.get("country") or data.get("country")
-            if not (email or country or profile.get("displayName")):
-                result.error = "profile payload empty — cookie likely dead"
+            # ``/api/account-settings/v1/profile`` returns 200 with a stub
+            # body for some logged-out edge cases; require *both* the email
+            # and country fields to land before calling the cookie alive.
+            if not email or not country:
+                result.error = "profile payload missing email/country (cookie likely dead)"
                 return result
 
             result.alive = True
