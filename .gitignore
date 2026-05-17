@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Bot runtime
+.env
+bot.log
+bot_data/
+bot.db
+bot.db-journal
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Temp
+*.tmp

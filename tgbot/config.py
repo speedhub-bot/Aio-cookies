@@ -1,0 +1,112 @@
+"""Bot configuration sourced from environment variables.
+
+Defaults mirror the patterns used in the speedhub-bot/Log repo so a new
+deployer only has to provide a ``BOT_TOKEN`` to get a working bot — the
+``API_ID`` / ``API_HASH`` fall back to Telegram Desktop's public values
+which work for everyone.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def _int(key: str, default: int) -> int:
+    raw = os.getenv(key)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _str(key: str, default: str) -> str:
+    raw = os.getenv(key)
+    return raw if raw is not None and raw != "" else default
+
+
+def _bool(key: str, default: bool) -> bool:
+    raw = os.getenv(key)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+# ── Telegram credentials ─────────────────────────────────────
+BOT_TOKEN: str = _str("BOT_TOKEN", "")
+
+# Telegram Desktop's well-known public api_id / api_hash. Anyone can
+# use these — they're shipped with the Desktop client. Override via env
+# if you have your own from https://my.telegram.org.
+API_ID: int = _int("API_ID", 2040)
+API_HASH: str = _str("API_HASH", "b18441a1ff607e10a989891a5462e627")
+
+# Optional. If set, critical errors get forwarded here.
+ADMIN_ID: int = _int("ADMIN_ID", 0)
+
+
+# ── Bot behaviour ────────────────────────────────────────────
+# Maximum file size we'll accept from a user (Telegram bot API caps
+# downloads at 20 MB through the HTTP API, so 20 MB is the practical
+# ceiling unless you wire pyrofork in front).
+MAX_FILE_BYTES: int = _int("MAX_FILE_BYTES", 20 * 1024 * 1024)
+
+# Thread pool size used by the synchronous scanners. Bigger = faster
+# zip processing but more outbound concurrency to each target.
+MAX_THREADS: int = _int("MAX_THREADS", 10)
+
+# Hard cap on how long a single scan job is allowed to run before we
+# bail out. Keeps a runaway job from blocking the bot forever.
+JOB_TIMEOUT_SECONDS: int = _int("JOB_TIMEOUT_SECONDS", 600)
+
+# Forwarded to the underlying scanner libraries via ``--proxy``.
+DEFAULT_PROXY: str = _str("DEFAULT_PROXY", "")
+
+
+# ── Paths ────────────────────────────────────────────────────
+DATA_DIR: Path = Path(_str("DATA_DIR", "bot_data"))
+LOG_FILE: str = _str("LOG_FILE", "bot.log")
+TEMP_DIR: Path = Path(_str("TEMP_DIR", "/tmp/aiocookies-bot"))
+
+
+# ── Hit notification defaults ────────────────────────────────
+# Default ON/OFF state for hit notifications when a user first opens
+# the bot. Per-user override lives in ``bot_data/settings.json``.
+HIT_NOTIFICATIONS_DEFAULT: bool = _bool("HIT_NOTIFICATIONS_DEFAULT", False)
+
+
+# ── Supported sites ──────────────────────────────────────────
+# Display order in the /start keyboard. The key is what we pass to the
+# scanner dispatcher; the label and emoji are what the user sees.
+SUPPORTED_SITES: list[dict[str, str]] = [
+    {"id": "claude.ai",       "label": "Claude.ai",       "emoji": "\U0001f7e3"},  # 🟣
+    {"id": "chatgpt.com",     "label": "ChatGPT",         "emoji": "\U0001f7e2"},  # 🟢
+    {"id": "cursor.com",      "label": "Cursor",          "emoji": "\U0001f535"},  # 🔵
+    {"id": "devin.ai",        "label": "Devin",           "emoji": "\U0001f7e1"},  # 🟡
+    {"id": "crunchyroll.com", "label": "Crunchyroll",     "emoji": "\U0001f7e0"},  # 🟠
+    {"id": "blackbox.ai",     "label": "Blackbox",        "emoji": "\u2b1b\ufe0f"},  # ⬛️
+    {"id": "manus.im",        "label": "Manus",           "emoji": "\U0001f9e0"},  # 🧠
+    {"id": "perplexity.ai",   "label": "Perplexity",      "emoji": "\U0001f50d"},  # 🔍
+]
+
+SUPPORTED_SITE_IDS: set[str] = {s["id"] for s in SUPPORTED_SITES}
+
+
+def site_label(site_id: str) -> str:
+    for s in SUPPORTED_SITES:
+        if s["id"] == site_id:
+            return f"{s['emoji']} {s['label']}"
+    return site_id
+
+
+def site_emoji(site_id: str) -> str:
+    for s in SUPPORTED_SITES:
+        if s["id"] == site_id:
+            return s["emoji"]
+    return "\u26aa"  # ⚪

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cookie-scanner"
+version = "0.1.0"
+description = "Cookie-based session scanner for blackbox.ai, manus.im, perplexity.ai. Validates cookies and extracts account info."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Akaza" }]
+license = { text = "MIT" }
+dependencies = [
+    "curl_cffi>=0.7.4",
+    "rich>=13.7",
+    "typer>=0.12",
+]
+
+[project.scripts]
+cookie-scanner = "cookiescanner.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cookiescanner*"]
