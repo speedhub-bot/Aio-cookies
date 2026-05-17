@@ -1,0 +1,17 @@
+[
+  {
+    "name": "__Secure-next-auth.session-token",
+    "value": "PASTE_REAL_TOKEN_HERE",
+    "domain": ".perplexity.ai"
+  },
+  {
+    "name": "next-auth.session-token",
+    "value": "PASTE_REAL_TOKEN_HERE",
+    "domain": ".blackbox.ai"
+  },
+  {
+    "name": "session_id",
+    "value": "PASTE_REAL_TOKEN_HERE",
+    "domain": ".manus.im"
+  }
+]

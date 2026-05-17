@@ -1,0 +1,11 @@
+python-telegram-bot[job-queue]>=20.0
+loguru>=0.7.0
+python-dotenv>=1.0.0
+# Used by cookie_checker.py for Cloudflare-fronted sites (perplexity etc.)
+# and by the cookiescanner package as its only HTTP client.
+curl_cffi>=0.7.4
+requests>=2.31
+# typer/rich are dependencies of cookiescanner.cli (used standalone). Keep
+# them here so `python -m cookiescanner.cli` still works alongside the bot.
+typer>=0.12
+rich>=13.7
