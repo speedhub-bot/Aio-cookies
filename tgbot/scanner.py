@@ -49,6 +49,10 @@ CS_SITES: set[str] = {
     "blackbox.ai",
     "manus.im",
     "perplexity.ai",
+    "netflix.com",
+    "primevideo.com",
+    "spotify.com",
+    "roblox.com",
 }
 
 

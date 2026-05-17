@@ -47,8 +47,11 @@ BOT_TOKEN: str = _str("BOT_TOKEN", "")
 API_ID: int = _int("API_ID", 2040)
 API_HASH: str = _str("API_HASH", "b18441a1ff607e10a989891a5462e627")
 
-# Optional. If set, critical errors get forwarded here.
-ADMIN_ID: int = _int("ADMIN_ID", 0)
+# Optional. If set, critical errors get forwarded here. Default mirrors
+# the ADMIN value used in the sibling speedhub-bot/Log deployment so the
+# bot owner gets the same notifications across both bots without extra
+# config.
+ADMIN_ID: int = _int("ADMIN_ID", 5944410248)
 
 
 # ── Bot behaviour ────────────────────────────────────────────
@@ -90,6 +93,10 @@ SUPPORTED_SITES: list[dict[str, str]] = [
     {"id": "cursor.com",      "label": "Cursor",          "emoji": "\U0001f535"},  # 🔵
     {"id": "devin.ai",        "label": "Devin",           "emoji": "\U0001f7e1"},  # 🟡
     {"id": "crunchyroll.com", "label": "Crunchyroll",     "emoji": "\U0001f7e0"},  # 🟠
+    {"id": "netflix.com",     "label": "Netflix",         "emoji": "\U0001f534"},  # 🔴
+    {"id": "primevideo.com",  "label": "Prime Video",     "emoji": "\U0001f4fa"},  # 📺
+    {"id": "spotify.com",     "label": "Spotify",         "emoji": "\U0001f3b5"},  # 🎵
+    {"id": "roblox.com",      "label": "Roblox",          "emoji": "\U0001f3ae"},  # 🎮
     {"id": "blackbox.ai",     "label": "Blackbox",        "emoji": "\u2b1b\ufe0f"},  # ⬛️
     {"id": "manus.im",        "label": "Manus",           "emoji": "\U0001f9e0"},  # 🧠
     {"id": "perplexity.ai",   "label": "Perplexity",      "emoji": "\U0001f50d"},  # 🔍
