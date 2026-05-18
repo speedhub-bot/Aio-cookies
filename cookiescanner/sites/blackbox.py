@@ -43,6 +43,24 @@ class BlackboxAdapter(SiteAdapter):
         "sessionId",
     )
 
+    # Real-world Blackbox exports often live on ``www.blackbox.ai``
+    # (sessionId) or ``.www.blackbox.ai`` (intercom/stripe). Suffix
+    # matching against the request host ``app.blackbox.ai`` would miss
+    # those, so we explicitly enumerate every plausible host here.
+    SUBDOMAIN_HOSTS = (
+        "app.blackbox.ai",
+        "www.blackbox.ai",
+        "blackbox.ai",
+        ".blackbox.ai",
+        ".www.blackbox.ai",
+    )
+
+    def host_cookies(self) -> dict[str, str]:
+        merged: dict[str, str] = {}
+        for h in self.SUBDOMAIN_HOSTS:
+            merged.update(self.jar.for_host(h))
+        return merged
+
     def scan(self) -> ScanResult:
         result = ScanResult(site=self.SITE, alive=False)
 

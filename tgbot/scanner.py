@@ -53,6 +53,8 @@ CS_SITES: set[str] = {
     "primevideo.com",
     "spotify.com",
     "roblox.com",
+    "shopify.com",
+    "facebook.com",
 }
 
 

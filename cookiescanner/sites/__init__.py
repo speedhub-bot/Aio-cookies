@@ -10,11 +10,13 @@ from __future__ import annotations
 
 from .base import SiteAdapter
 from .blackbox import BlackboxAdapter
+from .facebook import FacebookAdapter
 from .manus import ManusAdapter
 from .netflix import NetflixAdapter
 from .perplexity import PerplexityAdapter
 from .prime import PrimeVideoAdapter
 from .roblox import RobloxAdapter
+from .shopify import ShopifyAdapter
 from .spotify import SpotifyAdapter
 
 
@@ -27,6 +29,8 @@ def all_adapters() -> list[type[SiteAdapter]]:
         PrimeVideoAdapter,
         RobloxAdapter,
         SpotifyAdapter,
+        FacebookAdapter,
+        ShopifyAdapter,
     ]
 
 
@@ -34,10 +38,12 @@ __all__ = [
     "SiteAdapter",
     "all_adapters",
     "BlackboxAdapter",
+    "FacebookAdapter",
     "ManusAdapter",
     "NetflixAdapter",
     "PerplexityAdapter",
     "PrimeVideoAdapter",
     "RobloxAdapter",
+    "ShopifyAdapter",
     "SpotifyAdapter",
 ]
