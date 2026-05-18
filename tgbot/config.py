@@ -97,6 +97,8 @@ SUPPORTED_SITES: list[dict[str, str]] = [
     {"id": "primevideo.com",  "label": "Prime Video",     "emoji": "\U0001f4fa"},  # 📺
     {"id": "spotify.com",     "label": "Spotify",         "emoji": "\U0001f3b5"},  # 🎵
     {"id": "roblox.com",      "label": "Roblox",          "emoji": "\U0001f3ae"},  # 🎮
+    {"id": "shopify.com",     "label": "Shopify",         "emoji": "\U0001f6d2"},  # 🛒
+    {"id": "facebook.com",    "label": "Facebook",        "emoji": "\U0001f465"},  # 👥
     {"id": "blackbox.ai",     "label": "Blackbox",        "emoji": "\u2b1b\ufe0f"},  # ⬛️
     {"id": "manus.im",        "label": "Manus",           "emoji": "\U0001f9e0"},  # 🧠
     {"id": "perplexity.ai",   "label": "Perplexity",      "emoji": "\U0001f50d"},  # 🔍

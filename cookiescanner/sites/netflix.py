@@ -53,24 +53,48 @@ class NetflixAdapter(SiteAdapter):
             "Accept-Encoding": "identity",
         }
         with self.make_client(extra_headers=headers) as http:
-            # 1) /account/membership — primary page.
+            # 1) /account/membership — primary page. Netflix sometimes
+            #    rewrites a still-authenticated request to /account
+            #    (the new umbrella settings page) so we follow up to
+            #    two redirects on netflix.com before giving up.
             url = self.BASE_URL + "/account/membership"
             r = http.get(url)
             result.endpoints_tried.append(
                 {"url": url, "status": r.status_code, "len": len(r.text)}
             )
 
-            # Login redirect: cookie dead.
-            location = r.headers.get("location") or r.headers.get("Location") or ""
-            if r.status_code in (301, 302, 303, 307, 308) and "login" in location.lower():
-                result.error = f"membership page redirected to login ({location})"
-                return result
+            hops = 0
+            while r.status_code in (301, 302, 303, 307, 308) and hops < 2:
+                location = r.headers.get("location") or r.headers.get("Location") or ""
+                if not location:
+                    break
+                if "/login" in location.lower() or "/loginhelp" in location.lower():
+                    result.error = (
+                        f"membership page redirected to login ({location})"
+                    )
+                    return result
+                if location.startswith("/"):
+                    location = self.BASE_URL + location
+                if "netflix.com" not in location.lower():
+                    result.error = (
+                        f"membership page redirected off-domain ({location})"
+                    )
+                    return result
+                r = http.get(location)
+                result.endpoints_tried.append(
+                    {"url": location, "status": r.status_code, "len": len(r.text)}
+                )
+                hops += 1
+
             if r.status_code != 200:
-                result.error = f"membership page returned HTTP {r.status_code}"
+                result.error = (
+                    f"membership page returned HTTP {r.status_code} "
+                    f"after {hops} hop(s)"
+                )
                 return result
 
             text = r.text or ""
-            if "/login" in text and "isLoggedIn" not in text:
+            if "/login" in text and "isLoggedIn" not in text and "reactContext" not in text:
                 # Some accounts render a tiny redirect shim.
                 result.error = "membership page rendered login shim (cookie dead)"
                 return result
