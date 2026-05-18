@@ -202,6 +202,16 @@ def detect_site(cookies: list[dict], filename: str = "") -> str | None:
     if "etp_rt" in names or "sess_id" in names:
         return "crunchyroll.com"
 
+    # Roblox — .ROBLOSECURITY is the single auth cookie.
+    if any("roblox.com" in d for d in domains) or "roblox" in fname or "rblx" in fname:
+        return "roblox.com"
+    if ".ROBLOSECURITY" in names:
+        return "roblox.com"
+
+    # Blackbox.ai — next-auth.session-token / sessionId on app.blackbox.ai.
+    if any("blackbox.ai" in d for d in domains) or "blackbox" in fname:
+        return "blackbox.ai"
+
     return None
 
 
@@ -297,6 +307,155 @@ def _safe_post(session, url, headers, data=None, timeout=10, retries=2):
     return r
 
 
+def cffi_post(
+    url: str,
+    cookies: dict,
+    headers: dict | None = None,
+    data: str | dict | None = None,
+    proxy: str | None = None,
+) -> dict | None:
+    """POST counterpart to ``cffi_get``. Returns the same normalised shape."""
+    if not HAS_CFFI:
+        return None
+    hdrs = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    if headers:
+        hdrs.update(headers)
+    try:
+        r = cffi_requests.post(
+            url, cookies=cookies, headers=hdrs, data=data,
+            impersonate="chrome124",
+            proxies={"http": proxy, "https": proxy} if proxy else None,
+            timeout=15,
+        )
+        return {
+            "status": r.status_code,
+            "text": r.text,
+            "json": r.json() if r.headers.get("content-type", "").startswith("application/json") else None,
+        }
+    except Exception as e:
+        return {"status": 0, "text": str(e), "json": None}
+
+
+# Markers that distinguish a Cloudflare challenge page from a normal 403.
+# Cloudflare ties ``cf_clearance`` to the requester's IP, so cookies that
+# work in a browser will still 403 when replayed from a different IP.
+# Reporting that explicitly tells the user they need the same residential
+# IP / a proxy, rather than misleading them into thinking the session is
+# dead.
+_CF_CHALLENGE_MARKERS = (
+    "Just a moment...",
+    "cf-chl-bypass",
+    "challenge-platform",
+    "_cf_chl_opt",
+    "__cf_chl_jschl_tk__",
+    "cf-mitigated",
+)
+
+
+def _looks_like_cf_challenge(text: str) -> bool:
+    if not text:
+        return False
+    return any(m in text for m in _CF_CHALLENGE_MARKERS)
+
+
+def _http_error_message(resp: dict, endpoint: str) -> str:
+    """Turn a normalised ``_request_json`` response into a user-facing error.
+
+    The legacy checkers used to silently return ``alive=False`` for any
+    non-200, which made dead cookies indistinguishable from datacenter
+    Cloudflare blocks. Surface the distinction so the bot can tell the
+    user whether to refresh cookies or to use a residential proxy.
+    """
+    status = resp.get("status", 0)
+    text = resp.get("text") or ""
+    via = resp.get("via") or "requests"
+
+    if status == 0:
+        # Connection error / exception text was placed in ``text``.
+        return f"network error talking to {endpoint}: {text[:200]}"
+    if status == 401:
+        return f"{endpoint} returned 401 (cookie unauthorized — session is dead)"
+    if status == 403:
+        if _looks_like_cf_challenge(text):
+            return (
+                f"{endpoint} returned a Cloudflare challenge "
+                f"(403, via={via}); session likely alive but the IP isn't trusted — "
+                "use a residential proxy or refresh cookies from the same IP."
+            )
+        return f"{endpoint} returned 403"
+    if status == 429:
+        return f"{endpoint} returned 429 (rate-limited)"
+    return f"{endpoint} returned HTTP {status}"
+
+
+def _request_json(
+    session: "requests.Session",
+    url: str,
+    headers: dict,
+    cookie_dict: dict,
+    method: str = "GET",
+    data: str | dict | None = None,
+    proxy: str | None = None,
+    timeout: int = 15,
+) -> dict:
+    """Hit ``url`` and return a normalised ``{status, text, json, via}`` dict.
+
+    Tries curl_cffi (Chrome TLS impersonation) first because every site
+    we check that isn't roblox/blackbox is Cloudflare-fronted. Falls back
+    to the plain ``requests`` session if curl_cffi isn't installed, fails,
+    or also returns a 403 challenge that the requests session might bypass
+    (rare but cheap to try).
+    """
+    method = method.upper()
+
+    def _via_requests() -> dict:
+        try:
+            if method == "POST":
+                r = _safe_post(session, url, headers, data=data, timeout=timeout)
+            else:
+                r = _safe_get(session, url, headers, timeout=timeout)
+        except Exception as e:  # noqa: BLE001
+            return {"status": 0, "text": str(e), "json": None, "via": "requests"}
+        body = r.text or ""
+        parsed = None
+        ctype = r.headers.get("content-type", "")
+        if ctype.startswith("application/json"):
+            try:
+                parsed = r.json()
+            except (ValueError, TypeError):
+                parsed = None
+        return {"status": r.status_code, "text": body, "json": parsed, "via": "requests"}
+
+    def _via_cffi() -> dict | None:
+        if not HAS_CFFI:
+            return None
+        if method == "POST":
+            out = cffi_post(url, cookie_dict, headers=headers, data=data, proxy=proxy)
+        else:
+            out = cffi_get(url, cookie_dict, proxy=proxy, headers=headers)
+        if out is None:
+            return None
+        out = dict(out)
+        out["via"] = "cffi"
+        return out
+
+    cffi_resp = _via_cffi()
+    if cffi_resp and cffi_resp.get("status") == 200:
+        return cffi_resp
+
+    requests_resp = _via_requests()
+    if requests_resp.get("status") == 200:
+        return requests_resp
+
+    # Both failed — prefer the cffi response (richer status info)
+    # but fall back to the requests one if cffi was unavailable.
+    return cffi_resp or requests_resp
+
+
 def check_claude(cookies: list[dict], proxy: str | None = None) -> dict:
     """Check claude.ai session and fetch account info."""
     result = {"alive": False, "info": {}}
@@ -314,9 +473,27 @@ def check_claude(cookies: list[dict], proxy: str | None = None) -> dict:
         jar = cookies_to_jar(cookies, "claude.ai")
         s.cookies = jar
 
-        r = _safe_get(s, "https://claude.ai/api/organizations", headers, timeout=15)
-        if r.status_code == 200:
-            orgs = r.json()
+        # claude.ai is Cloudflare-fronted, so prefer curl_cffi Chrome
+        # impersonation; fall back to plain requests if cffi isn't
+        # available. _request_json surfaces 401/403/CF as a clear error
+        # instead of silently returning alive=False.
+        resp = _request_json(
+            s, "https://claude.ai/api/organizations", headers, cd,
+            method="GET", proxy=proxy, timeout=15,
+        )
+        if resp["status"] != 200:
+            result["error"] = _http_error_message(resp, "claude.ai/api/organizations")
+            return result
+
+        orgs = resp["json"]
+        if orgs is None:
+            try:
+                import json as _json
+                orgs = _json.loads(resp["text"])
+            except (ValueError, TypeError):
+                orgs = None
+
+        if True:
             result["alive"] = True
             if isinstance(orgs, list) and orgs:
                 org = orgs[0]
@@ -341,6 +518,12 @@ def check_claude(cookies: list[dict], proxy: str | None = None) -> dict:
                 result["info"]["free_credits"] = org.get("free_credits_status", "N/A")
                 result["info"]["active_flags"] = org.get("active_flags", [])
 
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+
+    # Below blocks reuse the open session ``s`` for the secondary endpoints.
+    try:
         # Usage info
         if result["alive"] and result["info"].get("org_id"):
             try:
@@ -386,9 +569,10 @@ def check_claude(cookies: list[dict], proxy: str | None = None) -> dict:
                     result["info"]["email"] = org_name.replace("\u2019s Organization", "").strip()
                 elif "'s Organization" in org_name:
                     result["info"]["email"] = org_name.replace("'s Organization", "").strip()
-
-    except Exception as e:
-        result["error"] = str(e)
+    except Exception:
+        # Secondary endpoints are best-effort; don't overwrite a successful
+        # alive=True just because a follow-up call broke.
+        pass
 
     return result
 
@@ -673,10 +857,30 @@ def check_crunchyroll(cookies: list[dict], proxy: str | None = None) -> dict:
             "Content-Type": "application/x-www-form-urlencoded",
         }
 
-        r = _safe_post(s, "https://beta-api.crunchyroll.com/auth/v1/token", token_headers, data={"grant_type": "etp_rt_cookie"}, timeout=15)
+        # crunchyroll.com is Cloudflare-fronted on both www and beta-api;
+        # prefer curl_cffi impersonation and surface 401/403/CF challenges
+        # as explicit errors instead of silently returning alive=False.
+        resp = _request_json(
+            s, "https://beta-api.crunchyroll.com/auth/v1/token", token_headers, cd,
+            method="POST",
+            data="grant_type=etp_rt_cookie",
+            proxy=proxy,
+            timeout=15,
+        )
 
-        if r.status_code == 200:
-            token_info = r.json()
+        if resp["status"] != 200:
+            result["error"] = _http_error_message(resp, "crunchyroll auth/v1/token")
+            return result
+
+        if True:
+            token_info = resp["json"]
+            if token_info is None:
+                try:
+                    import json as _json
+                    token_info = _json.loads(resp["text"])
+                except (ValueError, TypeError):
+                    token_info = {}
+            token_info = token_info or {}
             access_token = token_info.get("access_token")
             result["info"]["country"] = token_info.get("country", "N/A")
             result["info"]["token_type"] = token_info.get("token_type", "N/A")
