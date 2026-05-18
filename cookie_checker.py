@@ -50,6 +50,17 @@ SITES = {
 RESET = "\033[0m"
 
 
+# curl / Chrome export convention for HttpOnly cookies: the row is
+# prefixed with ``#HttpOnly_`` so older parsers that treat ``#`` as a
+# comment marker still skip it. Stealer-log and yt-dlp dumps inherit
+# the same prefix because they save cookies straight from Chrome's
+# cookie store. claude.ai's ``sessionKey``, crunchyroll's ``etp_rt`` /
+# ``sess_id``, chatgpt's ``__Secure-next-auth.session-token`` are all
+# HttpOnly, so without stripping this prefix the loader silently drops
+# every auth cookie that actually matters.
+_HTTPONLY_COOKIE_PREFIX = "#HttpOnly_"
+
+
 # ─── Cookie Loaders ─────────────────────────────────────────────────────────
 def load_cookies_json(filepath: str) -> list[dict]:
     """Load cookies from Playwright/browser JSON export."""
@@ -64,12 +75,24 @@ def load_cookies_json(filepath: str) -> list[dict]:
 
 
 def load_cookies_netscape(filepath: str) -> list[dict]:
-    """Load cookies from Netscape/Mozilla format (tab-separated)."""
+    """Load cookies from Netscape/Mozilla format (tab-separated).
+
+    Accepts the ``#HttpOnly_<domain>...`` curl/Chrome extension —
+    the prefix is stripped before tab-splitting so HttpOnly cookies
+    (claude.ai's ``sessionKey``, crunchyroll's ``etp_rt`` / ``sess_id``,
+    chatgpt's ``__Secure-next-auth.session-token`` etc.) parse the same
+    as regular rows instead of being dropped as comments.
+    """
     cookies = []
     with open(filepath) as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith("#"):
+            if not line:
+                continue
+            # Peel off the HttpOnly marker before the blanket ``#`` skip.
+            if line.startswith(_HTTPONLY_COOKIE_PREFIX):
+                line = line[len(_HTTPONLY_COOKIE_PREFIX):]
+            if line.startswith("#"):
                 continue
             parts = line.split("\t")
             if len(parts) >= 7:
@@ -77,7 +100,7 @@ def load_cookies_netscape(filepath: str) -> list[dict]:
                     "domain": parts[0].lstrip(".\ufeff"),
                     "path": parts[2],
                     "secure": parts[3].upper() == "TRUE",
-                    "expires": int(parts[4]) if parts[4].isdigit() else 0,
+                    "expires": int(parts[4]) if parts[4].lstrip("-").isdigit() else 0,
                     "name": parts[5],
                     "value": parts[6],
                 })
@@ -106,9 +129,19 @@ def load_cookie_file(filepath: str) -> list[dict]:
         except json.JSONDecodeError:
             pass
 
-    # Netscape format (tab-separated, usually starts with domain or #)
+    # Netscape format (tab-separated, usually starts with domain or #).
+    # Files that only contain HttpOnly cookies look like ``#HttpOnly_…``
+    # on every data line, so we must treat those as tab-separated too
+    # instead of letting the ``#`` filter blank the detection out.
     lines = content.split("\n")
-    if any("\t" in line and len(line.split("\t")) >= 7 for line in lines[:10] if not line.startswith("#")):
+
+    def _looks_like_netscape(raw: str) -> bool:
+        body = raw[len(_HTTPONLY_COOKIE_PREFIX):] if raw.startswith(_HTTPONLY_COOKIE_PREFIX) else raw
+        if body.startswith("#"):
+            return False
+        return "\t" in body and len(body.split("\t")) >= 7
+
+    if any(_looks_like_netscape(line) for line in lines[:50]):
         return load_cookies_netscape(filepath)
 
     # Header string format
@@ -127,10 +160,15 @@ def load_cookie_file(filepath: str) -> list[dict]:
 
 def detect_site(cookies: list[dict], filename: str = "") -> str | None:
     """Detect which site cookies belong to based on domain or cookie names."""
-    domains = set()
-    names = set()
+    domains: set[str] = set()
+    names: set[str] = set()
     for c in cookies:
         d = c.get("domain", "").lstrip(".")
+        # ``#HttpOnly_`` prefixes occasionally survive into the parsed
+        # ``domain`` field when the loader couldn't peel them (e.g. older
+        # callers that pre-parsed the file). Strip defensively here.
+        if d.startswith(_HTTPONLY_COOKIE_PREFIX):
+            d = d[len(_HTTPONLY_COOKIE_PREFIX):].lstrip(".")
         domains.add(d)
         names.add(c.get("name", ""))
 
