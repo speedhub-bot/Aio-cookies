@@ -1,8 +1,8 @@
-"""Tiny JSON-backed per-user settings store.
+"""Tiny JSON-backed bot state store.
 
-Keeps the dependency surface small — a single file under ``DATA_DIR``
-is enough for the bot's only stateful concept (the hit-notification
-toggle). Reads are in-process and writes are atomic via a rename.
+Keeps the dependency surface small — JSON files under ``DATA_DIR`` are
+enough for per-user settings and the live scan dashboard. Reads are
+in-process and writes are atomic via a rename.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +19,35 @@ from . import config
 
 _LOCK = asyncio.Lock()
 _CACHE: dict[str, dict[str, Any]] | None = None
+_STATS_CACHE: dict[str, Any] | None = None
 
 
 def _settings_path() -> Path:
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     return config.DATA_DIR / "settings.json"
+
+
+def _dashboard_path() -> Path:
+    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return config.DATA_DIR / "dashboard.json"
+
+
+def _empty_dashboard() -> dict[str, Any]:
+    return {
+        "total": 0,
+        "alive": 0,
+        "dead": 0,
+        "last_updated": None,
+        "sites": {
+            site["id"]: {
+                "total": 0,
+                "alive": 0,
+                "dead": 0,
+                "plans": {},
+            }
+            for site in config.SUPPORTED_SITES
+        },
+    }
 
 
 def _load_sync() -> dict[str, dict[str, Any]]:
@@ -47,11 +72,72 @@ def _save_sync(data: dict[str, dict[str, Any]]) -> None:
     os.replace(tmp, path)
 
 
+def _load_dashboard_sync() -> dict[str, Any]:
+    path = _dashboard_path()
+    if path.exists():
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return _normalise_dashboard(data)
+        except (OSError, json.JSONDecodeError):
+            pass
+    return _empty_dashboard()
+
+
+def _save_dashboard_sync(data: dict[str, Any]) -> None:
+    path = _dashboard_path()
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def _normalise_dashboard(data: dict[str, Any]) -> dict[str, Any]:
+    dashboard = _empty_dashboard()
+    for key in ("total", "alive", "dead"):
+        try:
+            dashboard[key] = int(data.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            dashboard[key] = 0
+    dashboard["last_updated"] = data.get("last_updated") or None
+
+    raw_sites = data.get("sites") if isinstance(data.get("sites"), dict) else {}
+    for site_id, raw in raw_sites.items():
+        if not isinstance(raw, dict):
+            continue
+        site = dashboard["sites"].setdefault(
+            str(site_id), {"total": 0, "alive": 0, "dead": 0, "plans": {}}
+        )
+        for key in ("total", "alive", "dead"):
+            try:
+                site[key] = int(raw.get(key, 0) or 0)
+            except (TypeError, ValueError):
+                site[key] = 0
+        plans = raw.get("plans") if isinstance(raw.get("plans"), dict) else {}
+        site["plans"] = {}
+        for plan, count in plans.items():
+            try:
+                value = int(count or 0)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                site["plans"][str(plan)] = value
+    return dashboard
+
+
 async def _ensure_loaded() -> dict[str, dict[str, Any]]:
     global _CACHE
     if _CACHE is None:
         _CACHE = await asyncio.to_thread(_load_sync)
     return _CACHE
+
+
+async def _ensure_dashboard_loaded() -> dict[str, Any]:
+    global _STATS_CACHE
+    if _STATS_CACHE is None:
+        _STATS_CACHE = await asyncio.to_thread(_load_dashboard_sync)
+    return _STATS_CACHE
 
 
 async def get_user_settings(user_id: int) -> dict[str, Any]:
@@ -97,3 +183,108 @@ async def toggle_bool(user_id: int, key: str, default: bool = False) -> bool:
 async def get_hit_notifications(user_id: int) -> bool:
     settings = await get_user_settings(user_id)
     return bool(settings.get("hit_notifications", config.HIT_NOTIFICATIONS_DEFAULT))
+
+
+def plan_label(site_id: str, info: dict[str, Any], alive: bool) -> str | None:
+    """Return the dashboard bucket for an ALIVE account's plan."""
+    if not alive:
+        return None
+
+    raw = _first_plan_value(info)
+    text = str(raw).strip() if raw is not None else ""
+    lowered = text.lower()
+
+    if not text or lowered in {"n/a", "na", "none", "null", "unknown", "false"}:
+        if info.get("is_pro") is True or info.get("is_premium") is True:
+            return _paid_fallback(site_id)
+        if info.get("is_pro") is False or info.get("is_premium") is False:
+            return "Free"
+        return "Unknown"
+
+    if "team/enterprise" in lowered:
+        return "Team/Enterprise"
+    if "enterprise" in lowered:
+        return "Enterprise"
+    if "team" in lowered:
+        return "Team"
+    if "max" in lowered or "ultra" in lowered:
+        return "Max"
+    if "plus" in lowered:
+        return "Plus"
+    if "prime" in lowered:
+        return "Prime"
+    if "premium" in lowered:
+        return "Premium"
+    if "pro" in lowered or "paid" in lowered or lowered == "active":
+        return "Pro"
+    if "trial" in lowered:
+        return "Trial"
+    if "free" in lowered or lowered == "basic":
+        return "Free"
+
+    return text[:80]
+
+
+def _first_plan_value(info: dict[str, Any]) -> Any:
+    for key in (
+        "plan",
+        "plan_name",
+        "subscription_tier",
+        "payment_tier",
+        "membership_status",
+        "tier",
+        "subscription_status",
+    ):
+        value = info.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _paid_fallback(site_id: str) -> str:
+    if site_id in {
+        "chatgpt.com",
+        "claude.ai",
+        "cursor.com",
+        "devin.ai",
+        "perplexity.ai",
+        "manus.im",
+    }:
+        return "Pro"
+    if site_id == "primevideo.com":
+        return "Prime"
+    return "Premium"
+
+
+async def record_scan_outcomes(outcomes: list[Any]) -> None:
+    if not outcomes:
+        return
+    async with _LOCK:
+        dashboard = await _ensure_dashboard_loaded()
+        for outcome in outcomes:
+            site_id = str(getattr(outcome, "site", "") or "unknown")
+            alive = bool(getattr(outcome, "alive", False))
+            site = dashboard["sites"].setdefault(
+                site_id, {"total": 0, "alive": 0, "dead": 0, "plans": {}}
+            )
+            dashboard["total"] += 1
+            site["total"] += 1
+            if alive:
+                dashboard["alive"] += 1
+                site["alive"] += 1
+                info = getattr(outcome, "info", {}) or {}
+                plan = plan_label(site_id, dict(info), alive=True)
+                if plan:
+                    plans = site.setdefault("plans", {})
+                    plans[plan] = int(plans.get(plan, 0)) + 1
+            else:
+                dashboard["dead"] += 1
+                site["dead"] += 1
+        dashboard["last_updated"] = datetime.now(UTC).isoformat(timespec="seconds")
+        await asyncio.to_thread(_save_dashboard_sync, dashboard)
+
+
+async def get_dashboard_stats() -> dict[str, Any]:
+    async with _LOCK:
+        dashboard = await _ensure_dashboard_loaded()
+        return json.loads(json.dumps(dashboard))
