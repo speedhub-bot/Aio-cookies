@@ -9,6 +9,7 @@ that prefix by curl / Chrome / yt-dlp.
 
 from __future__ import annotations
 
+import base64
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -271,3 +272,88 @@ def test_cf_challenge_marker_matches_real_body() -> None:
     assert cookie_checker._looks_like_cf_challenge(_CF_CHALLENGE_BODY)
     assert not cookie_checker._looks_like_cf_challenge('{"organizations":[]}')
     assert not cookie_checker._looks_like_cf_challenge("")
+
+
+# ── Crunchyroll OAuth body / client_id (live web SPA shape) ───────────
+
+
+def test_crunchyroll_token_body_uses_device_id_from_cookie() -> None:
+    """The token body must include the device_id from the cookie jar.
+
+    Without ``device_id`` + ``device_type`` the live token endpoint
+    returns ``invalid_request / missing_required_field`` — see the
+    diagnostic capture in the PR description.
+    """
+    body = cookie_checker._crunchyroll_token_body({"device_id": "abc-123", "etp_rt": "rt"})
+    assert "grant_type=etp_rt_cookie" in body
+    assert "device_id=abc-123" in body
+    assert "device_type=" in body
+
+
+def test_crunchyroll_token_body_fallback_device_id_when_cookie_absent() -> None:
+    body = cookie_checker._crunchyroll_token_body({"etp_rt": "rt"})
+    # Must still include a (non-empty) device_id so the endpoint accepts it.
+    assert "device_id=" in body
+    assert "device_id=&" not in body and not body.endswith("device_id=")
+
+
+def test_check_crunchyroll_uses_cr_web_client_id() -> None:
+    """The Authorization header must base64 the live ``noaihdevm_6iyg0a8l0q``
+    client id with an empty secret (PKCE-style)."""
+    captured: dict = {}
+
+    def fake_request_json(s, url, headers, cd, **kwargs):  # type: ignore[no-untyped-def]
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["body"] = kwargs.get("data", "")
+        return {
+            "status": 200,
+            "json": {
+                "access_token": "atok",
+                "country": "US",
+                "token_type": "Bearer",
+                "scope": "account",
+                "expires_in": 300,
+            },
+            "text": "",
+            "via": "cffi",
+        }
+
+    with patch.object(cookie_checker, "_request_json", side_effect=fake_request_json):
+        cookie_checker.check_crunchyroll(_minimal_crunchy_cookies() + [
+            {"domain": "crunchyroll.com", "name": "device_id", "value": "dev-uuid", "path": "/", "secure": True},
+        ])
+
+    assert captured["url"].endswith("/auth/v1/token")
+    auth = captured["headers"]["Authorization"]
+    assert auth.startswith("Basic ")
+    decoded = base64.b64decode(auth.removeprefix("Basic ")).decode()
+    assert decoded == "noaihdevm_6iyg0a8l0q:", f"expected the cr_web client_id with empty secret, got {decoded!r}"
+    assert "device_id=dev-uuid" in captured["body"]
+    assert "device_type=" in captured["body"]
+
+
+def test_check_crunchyroll_alive_on_200_with_access_token() -> None:
+    """Successful token exchange must flip alive=True and surface country
+    even when the downstream account/profile calls aren't mocked (the
+    follow-up GETs go through ``_safe_get`` which is independent)."""
+    resp = {
+        "status": 200,
+        "json": {
+            "access_token": "the-token",
+            "country": "JP",
+            "token_type": "Bearer",
+            "scope": "account",
+            "expires_in": 300,
+        },
+        "text": "",
+        "via": "cffi",
+    }
+    with patch.object(cookie_checker, "_request_json", return_value=resp):
+        # ``_safe_get`` is what fetches accounts/profile/subscriptions; the
+        # test doesn't need them populated, just needs alive=True.
+        with patch.object(cookie_checker, "_safe_get", side_effect=Exception("skip")):
+            r = cookie_checker.check_crunchyroll(_minimal_crunchy_cookies())
+    assert r["alive"] is True
+    assert r["info"]["country"] == "JP"
+    assert r.get("error") is None
