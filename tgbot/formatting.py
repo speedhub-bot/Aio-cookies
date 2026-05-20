@@ -15,6 +15,10 @@ from .scanner import ScanOutcome
 MAX_MESSAGE_LEN = 3800
 MAX_VALUE_LEN = 400
 
+# Credit line appended to every bot reply so users know who built it.
+# Kept short so it doesn't eat into the per-message length budget.
+BOT_CREDIT = "\U0001f916 Bot by <a href=\"https://t.me/akaza_isnt\">@akaza_isnt</a>"
+
 
 def _esc(value: Any) -> str:
     return html.escape(str(value), quote=False)
@@ -97,9 +101,11 @@ def format_outcome(outcome: ScanOutcome) -> str:
             lines.append(f"<pre>{_esc(value)}</pre>")
 
     body = "\n".join(lines)
-    if len(body) > MAX_MESSAGE_LEN:
-        body = body[: MAX_MESSAGE_LEN - 40] + "\n\u2026 (truncated)"
-    return body
+    # Reserve space for the credit footer so truncation never eats it.
+    body_budget = MAX_MESSAGE_LEN - len(BOT_CREDIT) - 2
+    if len(body) > body_budget:
+        body = body[: body_budget - 40] + "\n\u2026 (truncated)"
+    return body + "\n\n" + BOT_CREDIT
 
 
 def format_summary(outcomes: list[ScanOutcome]) -> str:
@@ -109,6 +115,7 @@ def format_summary(outcomes: list[ScanOutcome]) -> str:
     return (
         f"\U0001f9ee Scanned <b>{len(outcomes)}</b> file(s) "
         f"\u2014 <b>\u2705 {alive}</b> alive / <b>\u274c {dead}</b> dead"
+        f"\n\n{BOT_CREDIT}"
     )
 
 
@@ -135,5 +142,7 @@ def format_hit(outcome: ScanOutcome) -> str:
         f"\U0001f4b3 plan: <code>{_esc(_truncate(str(plan), 200))}</code>",
         f"\U0001f4c5 renewal/expiry: <code>{_esc(_truncate(str(renewal), 200))}</code>",
         f"\U0001f4ce <i>{_esc(outcome.filename)}</i>",
+        "",
+        BOT_CREDIT,
     ]
     return "\n".join(lines)
