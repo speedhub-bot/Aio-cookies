@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -833,6 +834,28 @@ def check_devin(cookies: list[dict], proxy: str | None = None) -> dict:
     return result
 
 
+_CR_WEB_CLIENT_ID = "noaihdevm_6iyg0a8l0q"
+
+
+def _crunchyroll_token_body(cd: dict) -> str:
+    """Build the form body the current Crunchyroll web token endpoint requires.
+
+    The legacy ``grant_type=etp_rt_cookie`` body alone now returns
+    ``invalid_request / missing_required_field`` — the live web SPA also sends
+    a ``device_id`` (the same value as the ``device_id`` cookie) and a
+    free-form ``device_type``. Both fields are mandatory; without them the
+    request 400s. The ``device_id`` falls back to a stable UUIDv4 if the
+    cookie is absent, mirroring what the web client does on its first visit.
+    """
+    from urllib.parse import urlencode
+    device_id = cd.get("device_id") or "00000000-0000-4000-8000-000000000000"
+    return urlencode({
+        "grant_type": "etp_rt_cookie",
+        "device_id": device_id,
+        "device_type": "Chrome on Linux",
+    })
+
+
 def check_crunchyroll(cookies: list[dict], proxy: str | None = None) -> dict:
     """Check crunchyroll.com session and fetch account info."""
     result = {"alive": False, "info": {}}
@@ -844,7 +867,11 @@ def check_crunchyroll(cookies: list[dict], proxy: str | None = None) -> dict:
         result["error"] = "no etp_rt cookie"
         return result
 
-    BASIC_AUTH = "aHJobzlxM2F3dnNrMjJ1LXRzNWE6cHROOURteXRBU2Z6QjZvbXVsSzh6cUxzYTczVE1TY1k="
+    # ``noaihdevm_6iyg0a8l0q`` is the public web client_id Crunchyroll ships
+    # in the SPA bundle today; the secret is empty (PKCE-style) so the
+    # base64 ends with ``Og==``. The old ``hrho9q3awvsk22u-ts5a`` client was
+    # retired and now returns ``unsupported_grant_type``.
+    BASIC_AUTH = base64.b64encode(f"{_CR_WEB_CLIENT_ID}:".encode()).decode()
 
     try:
         s = make_session(proxy)
@@ -855,6 +882,8 @@ def check_crunchyroll(cookies: list[dict], proxy: str | None = None) -> dict:
             "User-Agent": USER_AGENT,
             "Authorization": f"Basic {BASIC_AUTH}",
             "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": "https://www.crunchyroll.com/",
+            "Origin": "https://www.crunchyroll.com",
         }
 
         # crunchyroll.com is Cloudflare-fronted on both www and beta-api;
@@ -863,7 +892,7 @@ def check_crunchyroll(cookies: list[dict], proxy: str | None = None) -> dict:
         resp = _request_json(
             s, "https://beta-api.crunchyroll.com/auth/v1/token", token_headers, cd,
             method="POST",
-            data="grant_type=etp_rt_cookie",
+            data=_crunchyroll_token_body(cd),
             proxy=proxy,
             timeout=15,
         )
