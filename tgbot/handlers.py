@@ -28,6 +28,7 @@ from telegram.ext import (
 )
 
 from . import config, storage
+from .dashboard import format_start_dashboard
 from .formatting import BOT_CREDIT, format_hit, format_outcome, format_summary
 from .scanner import ScanOutcome, dump_netscape, scan_site
 
@@ -180,7 +181,8 @@ def _set_selected_site(context: ContextTypes.DEFAULT_TYPE, site_id: str) -> None
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _reply_or_edit(update, _START_TEXT, _sites_keyboard())
+    stats = await storage.get_dashboard_stats()
+    await _reply_or_edit(update, format_start_dashboard(stats), _sites_keyboard())
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -342,6 +344,10 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except BadRequest:
             pass
 
+        try:
+            await storage.record_scan_outcomes(outcomes)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to update live dashboard stats")
         await _deliver_outcomes(update, context, site_id, outcomes)
 
     finally:
