@@ -28,7 +28,7 @@ from telegram.ext import (
 )
 
 from . import config, storage
-from .formatting import format_hit, format_outcome, format_summary
+from .formatting import BOT_CREDIT, format_hit, format_outcome, format_summary
 from .scanner import ScanOutcome, dump_netscape, scan_site
 
 
@@ -88,6 +88,7 @@ _START_TEXT = (
     "Cookie validity + account info checker.\n\n"
     "Pick a site below, then send me your cookies "
     "(<code>.json</code> / <code>.txt</code> / <code>.zip</code>)."
+    "\n\n" + BOT_CREDIT
 )
 
 _HELP_TEXT = (
@@ -111,9 +112,17 @@ _HELP_TEXT = (
 
 _ABOUT_TEXT = (
     "<b>AIO Cookies Bot</b>\n"
-    "Built on top of <code>cookie_checker.py</code> and the "
-    "<code>cookiescanner</code> package in this repo.\n"
-    "Bot wiring by akaza (<a href=\"https://t.me/akaza_isnt\">@akaza_isnt</a>)."
+    "Cookie validity + account info checker for 14 sites, built on top "
+    "of <code>cookie_checker.py</code> and the <code>cookiescanner</code> "
+    "package in this repo.\n\n"
+    "\U0001f468\u200d\U0001f4bb <b>Built &amp; maintained by</b> "
+    "<a href=\"https://t.me/akaza_isnt\">@akaza_isnt</a> "
+    "(akaza). All bug reports, feature requests, and proxy donations "
+    "welcome.\n\n"
+    "Every reply / exported <code>cookies.txt</code> / hit notification "
+    "includes the credit line below so the bot stays attributable when "
+    "shared.\n\n"
+    + BOT_CREDIT
 )
 
 
@@ -377,12 +386,32 @@ async def _send_hit(update: Update, outcome: ScanOutcome) -> None:
     if not netscape.strip():
         return
     bio = io.BytesIO(netscape.encode("utf-8"))
-    bio.name = f"{outcome.site}.cookies.txt"
+    bio.name = _hit_filename(outcome)
     await msg.reply_document(
         document=InputFile(bio, filename=bio.name),
         caption=format_hit(outcome),
         parse_mode=ParseMode.HTML,
     )
+
+
+def _hit_filename(outcome: ScanOutcome) -> str:
+    """Render the filename used when shipping a hit back to the user.
+
+    Format: ``@akaza_<site>_<short-id>.txt`` so every exported cookies
+    file is attributable to @akaza_isnt's bot when it ends up shared on
+    other channels.  The short id is derived from the cookie payload so
+    re-scans of the same file produce the same filename (which is nice
+    for users keeping local copies).
+    """
+    import hashlib
+
+    site_slug = outcome.site.replace(".", "_")
+    payload = "|".join(
+        f"{c.get('name','')}={c.get('value','')}"
+        for c in outcome.cookies
+    )
+    short = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:8]
+    return f"@akaza_{site_slug}_{short}.txt"
 
 
 # ── Catch-all ────────────────────────────────────────────────
