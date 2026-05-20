@@ -87,6 +87,15 @@ def format_outcome(outcome: ScanOutcome) -> str:
             lines.append(f"{_esc(key)}: {_esc(text_val)}")
         lines.append("</pre>")
 
+    if outcome.refreshed_cookies:
+        lines.append("")
+        lines.append("\U0001f504 <b>Refreshed cookies</b> (replace these in your jar):")
+        for name, value in outcome.refreshed_cookies.items():
+            # Don't truncate — the whole point is to give the user back a
+            # usable cookie. Telegram's 4096-char cap is enforced below.
+            lines.append(f"<code>{_esc(name)}</code>")
+            lines.append(f"<pre>{_esc(value)}</pre>")
+
     body = "\n".join(lines)
     if len(body) > MAX_MESSAGE_LEN:
         body = body[: MAX_MESSAGE_LEN - 40] + "\n\u2026 (truncated)"

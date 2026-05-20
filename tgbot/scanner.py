@@ -69,6 +69,12 @@ class ScanOutcome:
     error: str | None = None
     cookies: list[dict[str, Any]] = field(default_factory=list)
     elapsed_s: float = 0.0
+    # Cookies the underlying adapter *rotated* during the scan, e.g.
+    # roblox.com's ``.ROBLOSECURITY`` after a successful auth-ticket
+    # refresh. Maps cookie name -> fresh value. The bot reply surfaces
+    # these so the user can keep them in sync with their on-disk jar
+    # and the account stays alive across future scans.
+    refreshed_cookies: dict[str, str] = field(default_factory=dict)
 
 
 # ── Cookie loading ───────────────────────────────────────────
@@ -100,25 +106,35 @@ def jar_from_cookies(cookies: Iterable[dict[str, Any]]) -> CookieJar:
 # ── Per-site scan ────────────────────────────────────────────
 
 
-def _scan_legacy(site_id: str, cookies: list[dict[str, Any]], proxy: str | None) -> tuple[bool, dict[str, Any], str | None]:
+def _scan_legacy(
+    site_id: str, cookies: list[dict[str, Any]], proxy: str | None
+) -> tuple[bool, dict[str, Any], str | None, dict[str, str]]:
     checker = legacy.CHECKERS.get(site_id)
     if checker is None:
-        return False, {}, f"no legacy checker for {site_id}"
+        return False, {}, f"no legacy checker for {site_id}", {}
     result = checker(cookies, proxy=proxy)
     return (
         bool(result.get("alive")),
         dict(result.get("info") or {}),
         result.get("error"),
+        dict(result.get("refreshed_cookies") or {}),
     )
 
 
-def _scan_cookiescanner(site_id: str, cookies: list[dict[str, Any]], proxy: str | None) -> tuple[bool, dict[str, Any], str | None]:
+def _scan_cookiescanner(
+    site_id: str, cookies: list[dict[str, Any]], proxy: str | None
+) -> tuple[bool, dict[str, Any], str | None, dict[str, str]]:
     jar = jar_from_cookies(cookies)
     results = cs_scan_all(jar, proxy=proxy, only=[site_id])
     if not results:
-        return False, {}, f"cookiescanner returned no result for {site_id}"
+        return False, {}, f"cookiescanner returned no result for {site_id}", {}
     r = results[0]
-    return bool(r.alive), dict(r.info or {}), r.error
+    return (
+        bool(r.alive),
+        dict(r.info or {}),
+        r.error,
+        dict(r.refreshed_cookies or {}),
+    )
 
 
 def scan_one_sync(
@@ -141,9 +157,9 @@ def scan_one_sync(
     proxy = proxy or (config.DEFAULT_PROXY or None)
 
     if site_id in LEGACY_SITES:
-        alive, info, err = _scan_legacy(site_id, cookies, proxy)
+        alive, info, err, refreshed = _scan_legacy(site_id, cookies, proxy)
     elif site_id in CS_SITES:
-        alive, info, err = _scan_cookiescanner(site_id, cookies, proxy)
+        alive, info, err, refreshed = _scan_cookiescanner(site_id, cookies, proxy)
     else:
         return ScanOutcome(
             site=site_id,
@@ -161,6 +177,7 @@ def scan_one_sync(
         error=err,
         cookies=cookies,
         elapsed_s=time.monotonic() - start,
+        refreshed_cookies=refreshed,
     )
 
 

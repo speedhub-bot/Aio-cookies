@@ -64,6 +64,31 @@ class HttpClient:
             **kwargs,
         )
 
+    def session_cookies(self) -> dict[str, str]:
+        """Return the session's current cookie jar as a flat dict.
+
+        Useful after a request whose ``Set-Cookie`` header rotates a
+        session token (e.g. Roblox's ``.ROBLOSECURITY`` refresh flow) —
+        the curl_cffi session jar is updated in place, so reading
+        cookies back here gets the *refreshed* value, not the seeded one.
+        """
+        out: dict[str, str] = {}
+        try:
+            for c in self._session.cookies:
+                name = getattr(c, "name", None)
+                value = getattr(c, "value", None)
+                if name and value is not None:
+                    out[str(name)] = str(value)
+        except TypeError:
+            # Some curl_cffi versions expose ``cookies`` as a mapping.
+            try:
+                for name, value in dict(self._session.cookies).items():
+                    if name and value is not None:
+                        out[str(name)] = str(value)
+            except Exception:
+                pass
+        return out
+
     def close(self) -> None:
         try:
             self._session.close()
